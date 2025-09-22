@@ -1,82 +1,92 @@
-Mouse Puller – README
+Skitzs Anti Recoil
 
 Overview
 
-This program allows controlled mouse movement with customizable sliders for down, left, right, and smoothness, along with rapid-fire functionality, named configs, and a Required ADS toggle. Built with C++, DirectX 11, and ImGui for the interface.
+Skitzs Anti Recoil is a small utility that allows you to:
+	•	Pull the mouse down, left, or right with adjustable strength and smoothness.
+	•	Use a rapid-fire toggle that clicks repeatedly while the main hotkey is held down.
+	•	Set required ADS, which makes mouse pulling only active when both left and right mouse buttons are pressed simultaneously.
+	•	Save and load named configuration files for different settings.
+	•	Customize hotkeys for main pulling, toggle, and rapid-fire functionality.
+	•	Displays a watermark (“Skitzs Anti Recoil”) in the GUI for branding.
 
-⚠️ Warning: Programs that simulate mouse/keyboard input may be flagged by Windows Defender as potentially unwanted software. Use responsibly.
+The program is fully GUI-driven using ImGui and works with DirectX 11.
 
 ⸻
 
 Features
-	•	Mouse Pulling:
-	•	Pull down, left, or right.
-	•	Smoothness adjustment.
-	•	Toggle on/off with hotkey.
-	•	Executes while main hotkey is held.
-	•	Rapid Fire:
-	•	Toggle on/off with a hotkey.
-	•	Only activates while main hotkey is held.
-	•	Adjustable speed (ms between clicks).
-	•	Config System:
-	•	Save/load named configs.
-	•	Delete configs.
-	•	Configs stored in configs/ folder.
-	•	Required ADS:
-	•	Mouse pulling only works if both Left + Right mouse buttons are held.
-	•	Adjustable delay (50–200ms) for checking button press.
-	•	Hotkey Remapping:
-	•	Main hotkey
-	•	Toggle hotkey
-	•	Rapid-fire toggle hotkey
-	•	GUI:
-	•	Pink and black themed menu using ImGui.
+	1.	Mouse Pulling
+	•	Adjustable pull down, pull left, pull right, and smoothness sliders.
+	•	Can be toggled on/off with a hotkey.
+	•	Optionally requires both mouse buttons pressed (Required ADS) for pulling to work.
+	2.	Rapid Fire
+	•	Toggle rapid-fire on/off with a hotkey.
+	•	Only executes while the main mouse button is held down.
+	•	Adjustable click speed via slider.
+	3.	Configuration
+	•	Save settings with a config name.
+	•	Load saved configs from a dropdown list.
+	•	Delete saved configs if no longer needed.
+	4.	GUI
+	•	Pink and black theme.
+	•	Watermark: “Skitzs Anti Recoil”.
+	•	Fully interactive sliders, buttons, and dropdown menus.
 
 ⸻
 
 Requirements
-
-Software
-	1.	Windows 10 or 11
-	2.	Visual Studio 2022 (or 2019 with C++ support)
-	3.	DirectX 11 SDK (usually included in Windows SDK)
-	4.	ImGui library
-	•	imgui.h, imgui.cpp, imgui_impl_win32.cpp, imgui_impl_dx11.cpp (and corresponding headers)
-	•	Can be downloaded from https://github.com/ocornut/imgui
-	5.	C++17 or later compiler support
-
-Hardware
-	•	Any standard Windows PC with mouse input support.
+	•	Windows 10 or later.
+	•	Visual Studio 2019+ or equivalent with C++ Desktop Development workload.
+	•	DirectX 11 SDK (usually included in Windows 10 SDK).
+	•	ImGui library with DirectX 11 and Win32 bindings.
 
 ⸻
 
-Setup Instructions
-	1.	Clone / copy the project into a Visual Studio solution.
-	2.	Include ImGui in your project and link the files:
-	•	imgui.cpp, imgui_draw.cpp, imgui_widgets.cpp, imgui_tables.cpp
-	•	Platform/renderer files: imgui_impl_win32.cpp, imgui_impl_dx11.cpp
-	3.	Add DirectX 11 libraries to linker settings:
-	•	d3d11.lib, dxgi.lib, d3dcompiler.lib
-	4.	Create a folder called configs in the same directory as the compiled EXE.
-	5.	Compile in Release or Debug mode.
+Compilation Instructions
+	1.	Clone or copy the code into a folder, e.g., SkitzsAntiRecoil.
+	2.	Create a new Visual Studio C++ Project
+	•	Type: Windows Desktop Application (Console or Empty project).
+	•	Add main.cpp (the code provided) to the project.
+	3.	Add ImGui to the project
+	•	Download ImGui from https://github.com/ocornut/imgui
+	•	Include the following files in your project:
+	•	imgui.cpp, imgui_draw.cpp, imgui_tables.cpp, imgui_widgets.cpp
+	•	imgui_impl_dx11.cpp, imgui_impl_win32.cpp
+	•	Include headers:
+	•	imgui.h, imgui_internal.h, imgui_impl_dx11.h, imgui_impl_win32.h
+	4.	Link DirectX 11 libraries
+	•	d3d11.lib
+	•	dxgi.lib
+	•	d3dcompiler.lib
+	•	(Set in Project Properties → Linker → Input → Additional Dependencies)
+	5.	Set C++17 standard (Project Properties → C/C++ → Language → C++ Language Standard → ISO C++17).
+	6.	Build the project.
+	•	After a successful build, the executable will be in the project’s Debug or Release folder.
+	7.	Run SkitzsAntiRecoil.exe
+	•	The GUI will open.
+	•	Adjust sliders, set hotkeys, and save configs as needed.
 
 ⸻
 
-Usage
-	1.	Run the compiled EXE.
-	2.	Use the sliders to adjust pulling down/left/right and smoothness.
-	3.	Set or use default hotkeys:
-	•	Main hotkey: hold to pull mouse.
-	•	Toggle hotkey: toggle mouse pulling on/off.
-	•	Rapid-fire hotkey: toggle rapid-fire on/off.
-	4.	Save/load named configs for quick switching.
-	5.	Enable Required ADS if you want pulling to only work while Left + Right buttons are pressed.
-	6.	Adjust rapid-fire speed to control click frequency.
+How to Use
+	1.	Set Hotkeys
+	•	Main Hotkey: Holds to activate mouse pulling.
+	•	Toggle Hotkey: Turns the pulling on/off globally.
+	•	Rapid Fire Hotkey: Toggles rapid-fire functionality.
+	2.	Adjust Sliders
+	•	Pull Down / Pull Right / Pull Left: Sets how much the mouse moves.
+	•	Smoothness: Adjusts how smoothly the mouse moves.
+	3.	Optional Features
+	•	Required ADS: When enabled, pulling only works if both left + right buttons are pressed.
+	•	Rapid Fire: Clicks repeatedly while the main hotkey is held down. Adjust speed with slider.
+	4.	Configurations
+	•	Save a configuration with a name.
+	•	Load or delete existing configs via the dropdown.
 
 ⸻
 
 Notes
-	•	Windows Defender may flag the EXE as potentially unwanted due to simulated mouse input.
-	•	Always use responsibly; do not use in environments where automation is prohibited.
-	•	The program must be run in desktop mode; does not work in UWP sandboxed apps.
-	•	Configs are stored in binary format inside the configs folder.
+	•	Designed for automation purposes only, not intended to cheat in any game.
+	•	The program interacts directly with the mouse, so Windows may flag behavior if misused.
+	•	Always test in a safe environment first.
+	•	Config files are saved in the configs folder in the same directory as the executable.
