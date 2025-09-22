@@ -90,3 +90,7 @@ Notes
 	•	The program interacts directly with the mouse, so Windows may flag behavior if misused.
 	•	Always test in a safe environment first.
 	•	Config files are saved in the configs folder in the same directory as the executable.
+
+
+
+i dont care if you use it in a game, but i dont take any responsablity if you get banned.
