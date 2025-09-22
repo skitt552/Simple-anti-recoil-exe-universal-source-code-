@@ -1,0 +1,363 @@
+#include <windows.h>
+#include <d3d11.h>
+#include <tchar.h>
+#include <string>
+#include <fstream>
+#include <thread>
+#include <iostream>
+#include <vector>
+#include <filesystem>
+#include "imgui.h"
+#include "imgui_impl_win32.h"
+#include "imgui_impl_dx11.h"
+
+#pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "d3dcompiler.lib")
+
+namespace fs = std::filesystem;
+
+// -------------------- DirectX globals --------------------
+ID3D11Device* g_pd3dDevice = NULL;
+ID3D11DeviceContext* g_pd3dDeviceContext = NULL;
+IDXGISwapChain* g_pSwapChain = NULL;
+ID3D11RenderTargetView* g_mainRenderTargetView = NULL;
+
+// -------------------- Config --------------------
+struct Config {
+    int pullDown = 0;
+    int pullRight = 0;
+    int pullLeft = 0;
+    int smoothness = 10;
+    int mainHotkey = VK_LBUTTON;
+    int toggleHotkey = VK_END;
+    int rapidFireToggleHotkey = VK_XBUTTON1;
+    int rapidFireDelay = 50;
+    bool enabled = false;
+    bool rapidFireToggled = false;
+    bool requiredADS = false;
+    int requiredADSSpeed = 100;
+} gConfig;
+
+// -------------------- State --------------------
+bool waitingForMainHotkey = false;
+bool waitingForToggleHotkey = false;
+bool waitingForRapidFireHotkey = false;
+bool togglePressed = false;
+bool rapidFireHotkeyPressed = false;
+
+static char configName[64] = "";
+static std::vector<std::string> configList;
+static int selectedConfig = -1;
+
+// -------------------- Helper Functions --------------------
+std::string GetKeyName(int vk)
+{
+    switch (vk) {
+    case VK_LBUTTON: return "Left Mouse";
+    case VK_RBUTTON: return "Right Mouse";
+    case VK_MBUTTON: return "Middle Mouse";
+    case VK_XBUTTON1: return "X1 Mouse";
+    case VK_XBUTTON2: return "X2 Mouse";
+    default:
+        UINT scanCode = MapVirtualKey(vk, MAPVK_VK_TO_VSC);
+        char name[128] = {};
+        if (GetKeyNameTextA(scanCode << 16, name, sizeof(name)))
+            return std::string(name);
+        else
+            return "Unknown";
+    }
+}
+
+void SaveConfig(const std::string& filename)
+{
+    std::ofstream out(filename, std::ios::binary);
+    if (!out.is_open()) return;
+    out.write((char*)&gConfig, sizeof(Config));
+    out.close();
+}
+
+void LoadConfig(const std::string& filename)
+{
+    std::ifstream in(filename, std::ios::binary);
+    if (!in.is_open()) return;
+    in.read((char*)&gConfig, sizeof(Config));
+    in.close();
+}
+
+void RefreshConfigList()
+{
+    configList.clear();
+    if (!fs::exists("configs")) fs::create_directory("configs");
+    for (const auto& entry : fs::directory_iterator("configs"))
+        if (entry.path().extension() == ".cfg")
+            configList.push_back(entry.path().stem().string());
+}
+
+void MoveMouseSmoothly(int dx, int dy, int steps = 5)
+{
+    POINT p;
+    GetCursorPos(&p);
+    float stepX = dx / (float)steps;
+    float stepY = dy / (float)steps;
+    for (int i = 0; i < steps; i++)
+    {
+        SetCursorPos(p.x + (int)((i + 1) * stepX), p.y + (int)((i + 1) * stepY));
+        Sleep(gConfig.smoothness / steps);
+    }
+}
+
+// -------------------- DirectX / Win32 --------------------
+bool CreateDeviceD3D(HWND hWnd)
+{
+    DXGI_SWAP_CHAIN_DESC sd{};
+    sd.BufferCount = 2;
+    sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    sd.BufferDesc.RefreshRate.Numerator = 60;
+    sd.BufferDesc.RefreshRate.Denominator = 1;
+    sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+    sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    sd.OutputWindow = hWnd;
+    sd.SampleDesc.Count = 1;
+    sd.SampleDesc.Quality = 0;
+    sd.Windowed = TRUE;
+    sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+
+    UINT createDeviceFlags = 0;
+    D3D_FEATURE_LEVEL featureLevel;
+    const D3D_FEATURE_LEVEL featureLevelArray[2] = { D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0 };
+    if (D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL,
+        createDeviceFlags, featureLevelArray, 2, D3D11_SDK_VERSION, &sd,
+        &g_pSwapChain, &g_pd3dDevice, &featureLevel, &g_pd3dDeviceContext) != S_OK)
+        return false;
+
+    ID3D11Texture2D* pBackBuffer;
+    g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&pBackBuffer));
+    g_pd3dDevice->CreateRenderTargetView(pBackBuffer, NULL, &g_mainRenderTargetView);
+    pBackBuffer->Release();
+    return true;
+}
+
+void CleanupDeviceD3D()
+{
+    if (g_mainRenderTargetView) { g_mainRenderTargetView->Release(); g_mainRenderTargetView = NULL; }
+    if (g_pSwapChain) { g_pSwapChain->Release(); g_pSwapChain = NULL; }
+    if (g_pd3dDeviceContext) { g_pd3dDeviceContext->Release(); g_pd3dDeviceContext = NULL; }
+    if (g_pd3dDevice) { g_pd3dDevice->Release(); g_pd3dDevice = NULL; }
+}
+
+extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
+LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
+        return true;
+    switch (msg)
+    {
+    case WM_SIZE:
+        if (g_pd3dDevice != NULL && wParam != SIZE_MINIMIZED)
+        {
+            if (g_mainRenderTargetView) { g_mainRenderTargetView->Release(); g_mainRenderTargetView = NULL; }
+            g_pSwapChain->ResizeBuffers(0, LOWORD(lParam), HIWORD(lParam), DXGI_FORMAT_UNKNOWN, 0);
+            ID3D11Texture2D* pBackBuffer;
+            g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&pBackBuffer));
+            g_pd3dDevice->CreateRenderTargetView(pBackBuffer, NULL, &g_mainRenderTargetView);
+            pBackBuffer->Release();
+        }
+        return 0;
+    case WM_SYSCOMMAND:
+        if ((wParam & 0xfff0) == SC_KEYMENU) return 0;
+        break;
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+    }
+    return DefWindowProc(hWnd, msg, wParam, lParam);
+}
+
+// -------------------- Main --------------------
+int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
+{
+    RefreshConfigList();
+    WNDCLASSEX wc{ sizeof(WNDCLASSEX), CS_CLASSDC, WndProc, 0L, 0L,
+        GetModuleHandle(NULL), NULL, NULL, NULL, NULL,
+        _T("MousePullerClass"), NULL };
+    RegisterClassEx(&wc);
+    HWND hwnd = CreateWindow(wc.lpszClassName, _T("Anti Recoil"),
+        WS_OVERLAPPEDWINDOW, 100, 100, 550, 500, NULL, NULL, wc.hInstance, NULL);
+
+    if (!CreateDeviceD3D(hwnd)) return 1;
+    ShowWindow(hwnd, SW_SHOWDEFAULT);
+    UpdateWindow(hwnd);
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    ImGui::StyleColorsDark();
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.05f, 0, 0.05f, 1);
+    style.Colors[ImGuiCol_Button] = ImVec4(1, 0.08f, 0.58f, 1);
+    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(1, 0.41f, 0.71f, 1);
+    style.Colors[ImGuiCol_Text] = ImVec4(1, 0.75f, 0.8f, 1);
+
+    ImGui_ImplWin32_Init(hwnd);
+    ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
+
+    MSG msg;
+    ZeroMemory(&msg, sizeof(msg));
+
+    while (msg.message != WM_QUIT)
+    {
+        if (PeekMessage(&msg, NULL, 0U, 0U, PM_REMOVE))
+        {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+            continue;
+        }
+
+        ImGui_ImplDX11_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+        ImGui::NewFrame();
+
+        // Watermark
+        ImVec2 windowPos = ImGui::GetMainViewport()->Pos;
+        ImVec2 windowSize = ImGui::GetMainViewport()->Size;
+        ImGui::SetNextWindowPos(ImVec2(windowPos.x + windowSize.x - 10, windowPos.y + 10), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+        ImGui::Begin("##Watermark", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+            ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground);
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.58f, 1.0f), "Skitzs Anti Recoil");
+        ImGui::End();
+
+        // GUI
+        std::string title = "Anti Recoil [" + std::string(gConfig.enabled ? "ON" : "OFF") + "]";
+        ImGui::Begin(title.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+
+        // Hotkeys
+        ImGui::Text("Main Hotkey: %s", GetKeyName(gConfig.mainHotkey).c_str());
+        if (waitingForMainHotkey) ImGui::Text("Press any key...");
+        else if (ImGui::Button("Set Main Hotkey")) waitingForMainHotkey = true;
+
+        ImGui::Text("Toggle Hotkey: %s", GetKeyName(gConfig.toggleHotkey).c_str());
+        if (waitingForToggleHotkey) ImGui::Text("Press any key...");
+        else if (ImGui::Button("Set Toggle Hotkey")) waitingForToggleHotkey = true;
+
+        if (ImGui::Button(gConfig.enabled ? "Turn Off" : "Turn On")) gConfig.enabled = !gConfig.enabled;
+
+        // Pull sliders
+        ImGui::SliderInt("Pull Down", &gConfig.pullDown, 0, 20);
+        ImGui::SliderInt("Pull Right", &gConfig.pullRight, 0, 20);
+        ImGui::SliderInt("Pull Left", &gConfig.pullLeft, 0, 20);
+        ImGui::SliderInt("Smoothness (ms)", &gConfig.smoothness, 1, 50);
+
+        // Rapid Fire
+        ImGui::Text("Rapid Fire Toggle Hotkey: %s", GetKeyName(gConfig.rapidFireToggleHotkey).c_str());
+        if (waitingForRapidFireHotkey) ImGui::Text("Press any key...");
+        else if (ImGui::Button("Set Rapid Fire Hotkey")) waitingForRapidFireHotkey = true;
+        ImGui::SliderInt("Rapid Fire Speed (ms)", &gConfig.rapidFireDelay, 1, 200);
+
+        // Configs
+        ImGui::InputText("Config Name", configName, IM_ARRAYSIZE(configName));
+        if (ImGui::Button("Save Config"))
+        {
+            if (!fs::exists("configs")) fs::create_directory("configs");
+            SaveConfig("configs/" + std::string(configName) + ".cfg");
+            RefreshConfigList();
+        }
+
+        if (!configList.empty())
+        {
+            if (ImGui::BeginCombo("Load Config", selectedConfig >= 0 ? configList[selectedConfig].c_str() : "Select"))
+            {
+                for (int n = 0; n < configList.size(); n++)
+                {
+                    bool isSelected = (selectedConfig == n);
+                    if (ImGui::Selectable(configList[n].c_str(), isSelected))
+                    {
+                        selectedConfig = n;
+                        LoadConfig("configs/" + configList[n] + ".cfg");
+                    }
+                    if (isSelected) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+
+            if (ImGui::Button("Delete Config") && selectedConfig >= 0)
+            {
+                std::string path = "configs/" + configList[selectedConfig] + ".cfg";
+                if (fs::exists(path))
+                {
+                    fs::remove(path);
+                    RefreshConfigList();
+                    selectedConfig = -1;
+                }
+            }
+        }
+
+        // Required ADS
+        ImGui::Checkbox("Required ADS", &gConfig.requiredADS);
+        ImGui::SliderInt("ADS Delay (ms)", &gConfig.requiredADSSpeed, 50, 200);
+
+        ImGui::End();
+
+        // Hotkey capture
+        for (int vk = 0x01; vk <= 0xFE; vk++)
+        {
+            if (waitingForMainHotkey && (GetAsyncKeyState(vk) & 0x8000)) { gConfig.mainHotkey = vk; waitingForMainHotkey = false; }
+            if (waitingForToggleHotkey && (GetAsyncKeyState(vk) & 0x8000)) { gConfig.toggleHotkey = vk; waitingForToggleHotkey = false; }
+            if (waitingForRapidFireHotkey && (GetAsyncKeyState(vk) & 0x8000)) { gConfig.rapidFireToggleHotkey = vk; waitingForRapidFireHotkey = false; }
+        }
+
+        // Toggle logic
+        if (GetAsyncKeyState(gConfig.toggleHotkey) & 0x8000)
+        {
+            if (!togglePressed) { gConfig.enabled = !gConfig.enabled; togglePressed = true; }
+        }
+        else togglePressed = false;
+
+        if (GetAsyncKeyState(gConfig.rapidFireToggleHotkey) & 0x8000)
+        {
+            if (!rapidFireHotkeyPressed) { gConfig.rapidFireToggled = !gConfig.rapidFireToggled; rapidFireHotkeyPressed = true; }
+        }
+        else rapidFireHotkeyPressed = false;
+
+        // -------------------- Mouse Pulling + Rapid Fire --------------------
+        if (gConfig.enabled && (GetAsyncKeyState(gConfig.mainHotkey) & 0x8000))
+        {
+            bool adsOk = true;
+            if (gConfig.requiredADS)
+            {
+                adsOk = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) && (GetAsyncKeyState(VK_RBUTTON) & 0x8000);
+            }
+
+            if (adsOk)
+            {
+                MoveMouseSmoothly(gConfig.pullRight - gConfig.pullLeft, gConfig.pullDown, 5);
+
+                // Rapid fire
+                if (gConfig.rapidFireToggled)
+                {
+                    mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                    Sleep(gConfig.rapidFireDelay);
+                    mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                }
+            }
+        }
+
+        // Render
+        ImGui::Render();
+        g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, NULL);
+        const float clear_color[4] = { 0.05f,0.0f,0.05f,1.0f };
+        g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clear_color);
+        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        g_pSwapChain->Present(1, 0);
+    }
+
+    // Cleanup
+    ImGui_ImplDX11_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+    CleanupDeviceD3D();
+    UnregisterClass(_T("MousePullerClass"), wc.hInstance);
+
+    return 0;
+}
